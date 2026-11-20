@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: tiny-track-rivals-online-preview
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: TTR_ALLOWED_ORIGINS
+        sync: false
