@@ -4,6 +4,7 @@ Run: pip install -r requirements.txt && python server.py
 """
 import asyncio
 import json
+import logging
 import os
 import re
 import secrets
@@ -12,6 +13,9 @@ from dataclasses import dataclass, field
 from typing import Any
 from aiohttp import web, WSMsgType
 
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s [TTR] %(message)s')
+LOG = logging.getLogger('ttr.online')
+BUILD = 'v0.13.6.34-online-diagnostic-1'
 PORT = int(os.getenv('PORT', '8765'))
 ROOMS: dict[str, 'Room'] = {}
 MAX_MSG = 24000
@@ -74,10 +78,13 @@ async def leave(ws):
 
 async def handler(request):
     origin=request.headers.get('Origin','')
+    LOG.info('WebSocket request from origin=%r, path=%s', origin, request.path)
     if ALLOWED and origin not in ALLOWED:
+        LOG.warning('WebSocket REJECTED (403). origin=%r, allowed_origins=%r', origin, sorted(ALLOWED))
         return web.Response(status=403,text='Origin non autorizzata')
     ws=web.WebSocketResponse(heartbeat=25,max_msg_size=MAX_MSG,autoping=True)
     await ws.prepare(request)
+    LOG.info('WebSocket ACCEPTED (101) from origin=%r', origin)
     await send(ws,{'type':'hello','protocol':1,'message':'TTR WebSocket lobby + host simulation relay'})
     try:
         async for msg in ws:
@@ -87,6 +94,8 @@ async def handler(request):
                 if not isinstance(d,dict):continue
             except (ValueError,TypeError):continue
             op=d.get('type','')
+            if op in ('create','join','find_public'):
+                LOG.info('Lobby request op=%r from origin=%r', op, origin)
             room,player=locate(ws)
             if op in ('create','find_public','join') and not room:
                 name=re.sub(r'[^\w .-]','',str(d.get('name','Pilota')))[:18].strip() or 'Pilota'
@@ -113,6 +122,7 @@ async def handler(request):
                 if slot is None:await send(ws,{'type':'error','message':'Sala piena'});continue
                 target.players[slot]=Player(ws,slot,name,car)
                 await send(ws,{'type':'joined','slot':slot,'code':target.code,'host':ws is target.host})
+                LOG.info('JOINED room=%s slot=%s host=%s', target.code, slot, ws is target.host)
                 await broadcast(target,room_state(target))
             elif op=='ready' and room and not room.started:
                 player.ready=bool(d.get('ready',True))
@@ -151,12 +161,15 @@ async def handler(request):
                 await leave(ws)
             else:
                 await send(ws,{'type':'error','message':'Operazione non valida in questo stato.'})
+    except Exception:
+        LOG.exception('Unexpected error in WebSocket handler (the player will be disconnected)')
     finally:
+        LOG.info('WebSocket connection ended; origin=%r; close_code=%r', origin, ws.close_code)
         await leave(ws)
     return ws
 
 async def health(_):
-    return web.json_response({'ok':True,'protocol':1,'rooms':len(ROOMS),'simulation':'host-authoritative-preview',
+    return web.json_response({'ok':True,'build':BUILD,'origin_filter_enabled':bool(ALLOWED),'protocol':1,'rooms':len(ROOMS),'simulation':'host-authoritative-preview',
                               'online_modes':['race']})
 
 async def cleanup(app):
