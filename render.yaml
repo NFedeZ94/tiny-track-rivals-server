@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: tiny-track-rivals-online-preview
+    name: tiny-track-rivals-online
     runtime: docker
     plan: free
     dockerfilePath: ./Dockerfile

@@ -15,7 +15,7 @@ from aiohttp import web, WSMsgType
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s [TTR] %(message)s')
 LOG = logging.getLogger('ttr.online')
-BUILD = 'v0.13.6.34-online-diagnostic-1'
+BUILD = 'v0.13.6.35-online-rtt'
 PORT = int(os.getenv('PORT', '8765'))
 ROOMS: dict[str, 'Room'] = {}
 MAX_MSG = 24000
@@ -85,7 +85,7 @@ async def handler(request):
     ws=web.WebSocketResponse(heartbeat=25,max_msg_size=MAX_MSG,autoping=True)
     await ws.prepare(request)
     LOG.info('WebSocket ACCEPTED (101) from origin=%r', origin)
-    await send(ws,{'type':'hello','protocol':1,'message':'TTR WebSocket lobby + host simulation relay'})
+    await send(ws,{'type':'hello','protocol':1,'features':['rtt_ping'],'message':'TTR WebSocket lobby + host simulation relay'})
     try:
         async for msg in ws:
             if msg.type!=WSMsgType.TEXT:continue
@@ -97,6 +97,13 @@ async def handler(request):
             if op in ('create','join','find_public'):
                 LOG.info('Lobby request op=%r from origin=%r', op, origin)
             room,player=locate(ws)
+            # Respond to application-level pings independently of lobby/race state.
+            # RTT is measured only by the client; no synchronized clocks required.
+            if op=='ping':
+                try:seq=int(d.get('seq',0))
+                except (TypeError,ValueError):seq=0
+                await send(ws,{'type':'pong','seq':max(0,min(seq,2147483647))})
+                continue
             if op in ('create','find_public','join') and not room:
                 name=re.sub(r'[^\w .-]','',str(d.get('name','Pilota')))[:18].strip() or 'Pilota'
                 car=max(0,min(4,int(d.get('car',0))))
